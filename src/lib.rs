@@ -536,7 +536,7 @@ impl Renderer {
         let vertex_buffer = &self.vertex_buffers[draw_list_buffers_index];
 
         // Make sure the current buffers are attached to the render pass.
-        rpass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
+        rpass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
         rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
 
         for cmd in draw_list.commands() {
@@ -598,7 +598,8 @@ impl Renderer {
 
     /// Upload the index buffer to the GPU.
     fn upload_index_buffer(&self, device: &Device, indices: &[DrawIdx]) -> Buffer {
-        let data = bytemuck::cast_slice(&indices);
+        let u32_index_vec: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
+        let data = bytemuck::cast_slice(u32_index_vec.as_slice());
         device.create_buffer_init(&BufferInitDescriptor {
             label: Some("imgui-wgpu index buffer"),
             contents: data,
