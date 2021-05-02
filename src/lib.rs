@@ -2,7 +2,7 @@ use imgui::{
     Context, DrawCmd::Elements, DrawData, DrawIdx, DrawList, DrawVert, TextureId, Textures,
 };
 use smallvec::SmallVec;
-use std::error::Error;
+use std::{error::Error, num::NonZeroU32};
 use std::fmt;
 use std::mem::size_of;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -72,7 +72,7 @@ impl<'a> Default for TextureConfig<'a> {
             size: Extent3d {
                 width: 0,
                 height: 0,
-                depth: 1,
+                depth_or_array_layers: 1,
             },
             label: None,
             format: None,
@@ -172,7 +172,7 @@ impl Texture {
     pub fn write(&self, queue: &Queue, data: &[u8], width: u32, height: u32) {
         queue.write_texture(
             // destination (sub)texture
-            TextureCopyView {
+            ImageCopyTexture {
                 texture: &self.texture,
                 mip_level: 0,
                 origin: Origin3d { x: 0, y: 0, z: 0 },
@@ -180,16 +180,16 @@ impl Texture {
             // source bitmap data
             data,
             // layout of the source bitmap
-            TextureDataLayout {
+            ImageDataLayout {
                 offset: 0,
-                bytes_per_row: width * 4,
-                rows_per_image: height,
+                bytes_per_row: NonZeroU32::new(width * 4),
+                rows_per_image: NonZeroU32::new(height),
             },
             // size of the source bitmap
             Extent3d {
                 width,
                 height,
-                depth: 1,
+                depth_or_array_layers: 1,
             },
         );
     }
@@ -206,7 +206,7 @@ impl Texture {
 
     /// The depth of the texture.
     pub fn depth(&self) -> u32 {
-        self.size.depth
+        self.size.depth_or_array_layers
     }
 
     /// The size of the texture in pixels.
@@ -391,15 +391,17 @@ impl Renderer {
                 buffers: &[VertexBufferLayout {
                     array_stride: size_of::<DrawVert>() as BufferAddress,
                     step_mode: InputStepMode::Vertex,
-                    attributes: &vertex_attr_array![0 => Float2, 1 => Float2, 2 => Uchar4Norm],
+                    attributes: &vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Unorm8x4],
                 }],
             },
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: FrontFace::Cw,
-                cull_mode: CullMode::None,
+                cull_mode: None,
                 polygon_mode: PolygonMode::Fill,
+                clamp_depth: false,
+                conservative: false
             },
             depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
                 format,
@@ -407,7 +409,6 @@ impl Renderer {
                 depth_compare: wgpu::CompareFunction::Always,
                 stencil: wgpu::StencilState::default(),
                 bias: DepthBiasState::default(),
-                clamp_depth: false,
             }),
             multisample: MultisampleState::default(),
             fragment: Some(FragmentState {
@@ -415,16 +416,18 @@ impl Renderer {
                 entry_point: "main",
                 targets: &[ColorTargetState {
                     format: texture_format,
-                    color_blend: BlendState {
-                        src_factor: BlendFactor::SrcAlpha,
-                        dst_factor: BlendFactor::OneMinusSrcAlpha,
-                        operation: BlendOperation::Add,
-                    },
-                    alpha_blend: BlendState {
-                        src_factor: BlendFactor::OneMinusDstAlpha,
-                        dst_factor: BlendFactor::One,
-                        operation: BlendOperation::Add,
-                    },
+                    blend: Some(BlendState {
+                        color: BlendComponent {
+                            src_factor: BlendFactor::SrcAlpha,
+                            dst_factor: BlendFactor::OneMinusSrcAlpha,
+                            operation: BlendOperation::Add,
+                        },
+                        alpha: BlendComponent {
+                            src_factor: BlendFactor::OneMinusDstAlpha,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        }
+                    }),
                     write_mask: ColorWrite::ALL,
                 }],
             }),
